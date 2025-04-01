@@ -1,0 +1,204 @@
+name: Déploiement Continu
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+
+jobs:
+  build:
+    name: Build et publication des images Docker
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configuration Docker BuildX
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login au DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build et Push image Nginx
+        uses: docker/build-push-action@v4
+        with:
+          context: ./app
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/max-project-nginx:${{ github.sha }}, ${{ secrets.DOCKERHUB_USERNAME }}/max-project-nginx:latest
+
+      - name: Générer manifestes Kubernetes avec la nouvelle image
+        run: |
+          sed -i "s|image: nginx-app:latest|image: ${{ secrets.DOCKERHUB_USERNAME }}/max-project-nginx:${{ github.sha }}|g" k8s/app-deployment.yaml
+          sed -i 's|imagePullPolicy: Never|imagePullPolicy: Always|g' k8s/app-deployment.yaml
+
+      - name: Archive des manifestes Kubernetes
+        uses: actions/upload-artifact@v3
+        with:
+          name: kubernetes-manifests
+          path: k8s/
+
+  deploy:
+    name: Déploiement sur serveur de production
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Télécharger les manifestes Kubernetes
+        uses: actions/download-artifact@v3
+        with:
+          name: kubernetes-manifests
+          path: k8s/
+
+      - name: Configuration de la connexion SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Ajouter le serveur à known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Transférer les manifestes vers le serveur
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} "mkdir -p /opt/max-project/k8s"
+          scp -r k8s/* ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }}:/opt/max-project/k8s/
+
+      - name: Déployer sur Kubernetes
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'ENDSSH'
+            # Vérifier que kubectl est installé
+            if ! command -v kubectl &> /dev/null; then
+              echo "Installation de kubectl..."
+              curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              chmod +x kubectl
+              sudo mv kubectl /usr/local/bin/
+            fi
+
+            # Se connecter au cluster avec les identifiants stockés
+            echo "${{ secrets.KUBECONFIG }}" > /tmp/kubeconfig
+            export KUBECONFIG=/tmp/kubeconfig
+
+            # Déployer les manifestes
+            cd /opt/max-project
+            
+            # Créer les PVCs
+            kubectl apply -f k8s/sonarqube/sonarqube-pvc.yaml
+            kubectl apply -f k8s/grafana/grafana-pvc.yaml
+            kubectl apply -f k8s/prometheus/prometheus-pvc.yaml
+
+            # Déployer Prometheus
+            kubectl apply -f k8s/prometheus/prometheus-config.yaml
+            kubectl apply -f k8s/prometheus/prometheus-deployment.yaml
+            kubectl apply -f k8s/prometheus/prometheus-service.yaml
+
+            # Déployer Grafana
+            kubectl apply -f k8s/grafana/grafana-datasource.yaml
+            kubectl apply -f k8s/grafana/grafana-deployment.yaml
+            kubectl apply -f k8s/grafana/grafana-service.yaml
+
+            # Déployer SonarQube
+            kubectl apply -f k8s/sonarqube/sonarqube-deployment.yaml
+            kubectl apply -f k8s/sonarqube/sonarqube-service.yaml
+
+            # Déployer l'application
+            kubectl apply -f k8s/app-deployment.yaml
+            kubectl apply -f k8s/app-service.yaml
+
+            # Nettoyer les anciens pods si nécessaire (rollout)
+            kubectl rollout restart deployment/nginx-app
+            
+            # Vérifier l'état du déploiement
+            kubectl get pods
+            kubectl get services
+            
+            # Supprimer le fichier de configuration temporaire
+            rm /tmp/kubeconfig
+          ENDSSH
+
+  verify:
+    name: Vérification du déploiement
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configurer SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Ajouter le serveur à known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Vérifier la disponibilité des services
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SERVER_IP }} << 'ENDSSH'
+            # Utiliser les identifiants de connexion
+            echo "${{ secrets.KUBECONFIG }}" > /tmp/kubeconfig
+            export KUBECONFIG=/tmp/kubeconfig
+            
+            echo "Vérification des pods..."
+            kubectl wait --for=condition=available deployment/nginx-app --timeout=300s
+            kubectl wait --for=condition=available deployment/grafana --timeout=300s
+            kubectl wait --for=condition=available deployment/prometheus --timeout=300s
+            kubectl wait --for=condition=available deployment/sonarqube --timeout=300s
+            
+            echo "Vérification des endpoints..."
+            NGINX_URL=$(kubectl get service nginx-app-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [ -z "$NGINX_URL" ]; then
+              NGINX_PORT=$(kubectl get service nginx-app-service -o jsonpath='{.spec.ports[0].nodePort}')
+              NGINX_URL="$(hostname -I | awk '{print $1}'):$NGINX_PORT"
+            fi
+            
+            echo "Application disponible à l'adresse: $NGINX_URL"
+            
+            # Test simple
+            curl -s $NGINX_URL | grep "Application Web" || exit 1
+            echo "✅ Déploiement vérifié avec succès!"
+            
+            rm /tmp/kubeconfig
+          ENDSSH
+
+  notify:
+    name: Notification de déploiement
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notification de réussite
+        if: ${{ needs.verify.result == 'success' }}
+        run: |
+          echo "Déploiement terminé avec succès!"
+          # Ajouter ici une intégration avec Slack/Teams/Discord/Email si nécessaire
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"✅ Déploiement réussi pour ${{ github.repository }} (${{ github.ref_name }})"}' \
+          #   ${{ secrets.SLACK_WEBHOOK }}
+          
+      - name: Notification d'échec
+        if: ${{ needs.verify.result != 'success' }}
+        run: |
+          echo "❌ Échec du déploiement!"
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"❌ Échec du déploiement pour ${{ github.repository }} (${{ github.ref_name }})"}' \
+          #   ${{ secrets.SLACK_WEBHOOK }}
+
+  cleanup:
+    name: Nettoyage des artefacts
+    needs: [deploy, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Supprimer les artefacts temporaires
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: kubernetes-manifests
+          failOnError: false

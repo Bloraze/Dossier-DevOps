@@ -1,0 +1,157 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate:
+    name: Valider les manifestes Kubernetes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Installer kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo cp kubeval /usr/local/bin
+
+      - name: Valider les fichiers YAML Kubernetes
+        run: |
+          find k8s -name "*.yaml" -exec kubeval {} \;
+
+  build:
+    name: Construire et tester l'image Docker
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Construire l'image Nginx
+        uses: docker/build-push-action@v4
+        with:
+          context: ./app
+          push: false
+          load: true
+          tags: nginx-app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Tester l'image Docker
+        run: |
+          docker run --rm -d -p 8080:80 --name test-nginx nginx-app:latest
+          sleep 5
+          curl -s --retry 10 --retry-connrefused http://localhost:8080 | grep "Application Web Nginx"
+          docker stop test-nginx
+
+  security:
+    name: Analyse de sécurité
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Scanner les vulnérabilités Docker
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Analyser les fichiers YAML
+        uses: kubescape/github-action@main
+        with:
+          files: "k8s/"
+          format: "sarif"
+          outputFile: "kubescape-results.sarif"
+          frameworks: "nsa,mitre"
+
+      - name: Uploader les résultats de sécurité
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: kubescape-results.sarif
+          category: kubescape
+
+  sonarqube:
+    name: Analyse SonarQube
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Analyse SonarQube
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  documentation:
+    name: Vérifier la documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Vérifier le README
+        run: |
+          if ! grep -q "## Installation et déploiement" README.md; then
+            echo "La documentation manque des sections essentielles"
+            exit 1
+          fi
+
+  integration:
+    name: Tests d'intégration
+    runs-on: ubuntu-latest
+    needs: [build, security]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configurer k3d
+        uses: nolar/setup-k3d-k3s@v1
+        with:
+          version: v1.25
+
+      - name: Déployer sur K3d
+        run: |
+          docker build -t nginx-app:latest ./app/
+          kubectl apply -f k8s/app-deployment.yaml
+          kubectl apply -f k8s/app-service.yaml
+          kubectl wait --for=condition=available --timeout=60s deployment/nginx-app
+          
+      - name: Tester le déploiement
+        run: |
+          kubectl port-forward svc/nginx-app-service 8080:80 &
+          sleep 5
+          curl -s http://localhost:8080 | grep "Application Web Nginx"
+
+  notify:
+    name: Notification de fin de CI
+    runs-on: ubuntu-latest
+    needs: [validate, build, security, sonarqube, documentation, integration]
+    if: always()
+    steps:
+      - name: Résumé du pipeline CI
+        run: |
+          echo "Le pipeline CI est terminé"
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            echo "Certaines étapes ont échoué"
+            exit 1
+          else
+            echo "Toutes les étapes ont réussi"
+          fi

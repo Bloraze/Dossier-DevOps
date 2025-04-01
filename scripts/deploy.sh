@@ -42,21 +42,21 @@ echo "✅ Tous les services ont été déployés !"
 
 # Attente que les services soient prêts
 echo "⏳ Attente du démarrage des services..."
-sleep 30
+sleep 60
 
-# Affichage des URLs
-echo "🌍 URL de l'application web (Nginx) :"
-minikube service nginx-app-service --url
+kubectl port-forward svc/nginx-app-service 8080:80 &
+kubectl port-forward svc/grafana-service 3000:3000 &
+kubectl port-forward svc/prometheus-service 9090:9090 &
+kubectl port-forward svc/sonarqube-service 9000:9000 &
 
-echo "🌍 URL de SonarQube :"
-minikube service sonarqube-service --url
+echo ""
+echo "Accédez aux services via:"
+echo "- Application web (Nginx): http://localhost:8080/"
+echo "- Grafana: http://localhost:3000/ (admin/admin)"
+echo "- Prometheus: http://localhost:9090/"
+echo "- SonarQube: http://localhost:9000/ (admin/admin)"
 
-echo "🌍 URL de Grafana :"
-minikube service grafana-service --url
-
-echo "🌍 URL de Prometheus :"
-minikube service prometheus-service --url
-
-echo "📌 Les URL ci-dessus peuvent être utilisées depuis votre navigateur."
-
+# Afficher l'état des pods
+echo ""
+echo "📊 État actuel des pods:"
 kubectl get pods
