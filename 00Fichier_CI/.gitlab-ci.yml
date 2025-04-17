@@ -1,0 +1,36 @@
+stages:
+  - validate
+  - build
+  - deploy
+
+lint-dockerfile:
+  stage: validate
+  image: hadolint/hadolint
+  script:
+    - hadolint Dockerfile
+  tags:
+    - docker
+
+validate-configmap:
+  stage: validate
+  image: bitnami/kubectl:latest
+  script:
+    - echo "🧪 Validation du fichier configmap..."
+    - kubectl apply --dry-run=client --validate=true -f k8s/nginx-configmap.yaml
+  tags:
+    - docker
+
+build-image:
+  stage: build
+  script:
+    - eval $(minikube docker-env)
+    - docker build -t nginx-app:latest .
+  tags:
+    - docker
+
+deploy:
+  stage: deploy
+  script:
+    - kubectl rollout restart deployment nginx-app
+  tags:
+    - docker

@@ -1,0 +1,19 @@
+verifier que les action github sont les bonne  version 
+
+aprendre les secret sur git hub 
+
+Penser a un formulaire de contact -> analyse BDD avec sonarcube 
+
+Voir securiter -> integrer 
+
+Monter VM linux montre le script Bash
+
+RDV Mardi 22/04 9h -> distanciel ( boucle CI/CD ) 
+ 
+Lundi 28 Presentiel 9h 
+
+Anisbel -> cration VM 
+
+Fin du projet -> fin du dossier -> Powerpoint -> mindmap//roadmap 
+
+Date Exam 02/05 et 03/05 Temps Presentation  ->  30Min 

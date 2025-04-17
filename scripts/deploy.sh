@@ -29,6 +29,7 @@ kubectl apply -f k8s/grafana/grafana-service.yaml
 
 # Déployer Prometheus
 echo "🚀 Déploiement de Prometheus..."
+kubectl apply -f k8s/prometheus/prometheus-rbac.yaml
 kubectl apply -f k8s/prometheus/prometheus-config.yaml
 kubectl apply -f k8s/prometheus/prometheus-deployment.yaml
 kubectl apply -f k8s/prometheus/prometheus-service.yaml
@@ -42,7 +43,7 @@ echo "✅ Tous les services ont été déployés !"
 
 # Attente que les services soient prêts
 echo "⏳ Attente du démarrage des services..."
-sleep 60
+sleep 80
 
 kubectl port-forward svc/nginx-app-service 8080:80 &
 kubectl port-forward svc/grafana-service 3000:3000 &
