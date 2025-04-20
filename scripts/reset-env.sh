@@ -16,4 +16,7 @@ echo "🧼 Suppression des certificats et config Minikube..."
 rm -rf ~/.minikube
 rm -rf ~/.kube
 
+echo "🧽 Suppression du cache de build Docker (BuildKit)..."
+docker builder prune -a -f
+
 echo "✅ Environnement propre ! Tu peux relancer ./setup-minikube.sh"
