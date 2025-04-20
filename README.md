@@ -27,14 +27,6 @@ Tous les prérequis sont installables via les scripts fournis :
 ```bash
 chmod +x scripts/install-prerequis.sh
 ./scripts/install-prerequis.sh
-```
-
-### 🧬 2. Installer les outils de validation (hadolint, yamllint, tidy, etc.)
-```bash
-chmod +x scripts/install-prepred.sh
-./scripts/install-prepred.sh
-```
-
 ---
 
 ## 🚀 Mise en route
