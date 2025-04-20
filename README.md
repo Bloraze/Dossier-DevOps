@@ -14,7 +14,7 @@ Il fonctionne de pair avec le dépôt GitLab suivant, qui contient la partie CI/
 
 ## 💻 Environnement conseillé
 
-- 🌧️ **Système recommandé** : Ubuntu (natif ou via [WSL](https://learn.microsoft.com/fr-fr/windows/wsl/) sur Windows)
+- 🐧 **Système recommandé** : Ubuntu (natif ou via [WSL](https://learn.microsoft.com/fr-fr/windows/wsl/) sur Windows)
 - 🧠 **Éditeur conseillé** : [Visual Studio Code](https://code.visualstudio.com/) avec l’extension *Remote - WSL* ou un terminal intégré
 
 ---
@@ -23,10 +23,12 @@ Il fonctionne de pair avec le dépôt GitLab suivant, qui contient la partie CI/
 
 Tous les prérequis sont installables via les scripts fournis :
 
-### 🧬 1. Installer les outils nécessaires (Docker, Minikube, kubectl, etc.)
+### 🧩 1. Installer les outils nécessaires (Docker, Minikube, kubectl, etc.)
 ```bash
 chmod +x scripts/install-prerequis.sh
 ./scripts/install-prerequis.sh
+```
+
 ---
 
 ## 🚀 Mise en route
