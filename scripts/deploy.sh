@@ -43,7 +43,7 @@ echo "✅ Tous les services ont été déployés !"
 
 # Attente que les services soient prêts
 echo "⏳ Attente du démarrage des services..."
-sleep 80
+sleep 180
 
 kubectl port-forward svc/nginx-app-service 8080:80 &
 kubectl port-forward svc/grafana-service 3000:3000 &

@@ -1,9 +1,3 @@
-verifier que les action github sont les bonne  version 
-
-aprendre les secret sur git hub 
-
-Penser a un formulaire de contact -> analyse BDD avec sonarcube 
-
 Voir securiter -> integrer 
 
 Monter VM linux montre le script Bash
